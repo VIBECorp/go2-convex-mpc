@@ -8,7 +8,7 @@ from scipy.linalg import expm
 class ComTraj:
 
     def __init__(self, go2: PinGo2Model):
-        self.dummy_go2 = PinGo2Model()
+        self.dummy_go2 = type(go2)()    # same robot class as the one being controlled
         x_vec = go2.compute_com_x_vec().reshape(-1)
         self.pos_des_world = x_vec[0:3]
 
@@ -32,7 +32,14 @@ class ComTraj:
                         y_vel_des_body: float,
                         z_pos_des_body: float,
                         yaw_rate_des_body: float,
-                        time_step: float):
+                        time_step: float,
+                        roll_des_body: float = 0.0,
+                        pitch_des_body: float = 0.0,
+                        roll_rate_des_body: float = 0.0,
+                        pitch_rate_des_body: float = 0.0,
+                        x_pos_des_world: float = None,
+                        y_pos_des_world: float = None,
+                        z_vel_des_body: float = 0.0):
         
         self.initial_x_vec= go2.compute_com_x_vec()
         initial_pos = self.initial_x_vec[0:3]
@@ -45,7 +52,14 @@ class ComTraj:
 
 
         max_pos_error = 0.1   # define the threshold for error of position
-        
+
+        # Direct x/y position command (e.g. standing body sway);
+        # overrides the drift-corrected desired position, clamp below still applies
+        if x_pos_des_world is not None:
+            self.pos_des_world[0] = x_pos_des_world
+        if y_pos_des_world is not None:
+            self.pos_des_world[1] = y_pos_des_world
+
         #clamp desired world COM to stay near current position
         if self.pos_des_world[0] - x0 > max_pos_error:
             self.pos_des_world[0] = x0 + max_pos_error
@@ -71,6 +85,7 @@ class ComTraj:
         # Rotation
         R_z = go2.R_z
         vel_desired_world = R_z @ np.array([x_vel_des_body, y_vel_des_body, 0.0])
+        vel_desired_world[2] = z_vel_des_body   # vertical feedforward (e.g. squat)
         go2.x_vel_des_world = vel_desired_world[0]
         go2.y_vel_des_world = vel_desired_world[1]
 
@@ -92,14 +107,15 @@ class ComTraj:
         self.vel_traj_world[:, :] = vel_desired_world.reshape(3, 1)
 
         # RPY in world:
-        # Keep roll, pitch constant; integrate yaw with desired yaw rate
-        self.rpy_traj_world[0, :] = 0.0
-        self.rpy_traj_world[1, :] = 0.0
+        # Integrate commanded roll/pitch/yaw with their desired rates over the horizon.
+        # The linearized (yaw-only) dynamics assume small roll/pitch, so keep commands modest.
+        self.rpy_traj_world[0, :] = roll_des_body + roll_rate_des_body * t_vec
+        self.rpy_traj_world[1, :] = pitch_des_body + pitch_rate_des_body * t_vec
         self.rpy_traj_world[2, :] = yaw + yaw_rate_des_body * t_vec
 
-        # RPY rates in BODY frame: only yaw rate non-zero
-        self.omega_traj_world[0, :] = 0.0
-        self.omega_traj_world[1, :] = 0.0
+        # RPY rates in BODY frame (small-angle: omega ~= rpy rate)
+        self.omega_traj_world[0, :] = roll_rate_des_body
+        self.omega_traj_world[1, :] = pitch_rate_des_body
         self.omega_traj_world[2, :] = yaw_rate_des_body
         go2.yaw_rate_des_world = yaw_rate_des_body
 

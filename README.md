@@ -12,6 +12,9 @@ The controller is designed following the methodology described in the following 
 
 The objective of this project is to reproduce the main ideas presented in the paper — particularly the **contact-force MPC formulation**, convex optimization structure, and robust locomotion behavior—while integrating them into a modern, modular robotics control pipeline.
 
+A detailed write-up of the controller (dynamics model, discretization, QP formulation, leg control, tuning notes) is available in [docs/mpc_overview.md](docs/mpc_overview.md) (Korean).
+For real-robot deployment, a proprioceptive state estimator (leg-odometry Kalman filter) is described in [docs/state_estimation.md](docs/state_estimation.md) (Korean) and validated in `examples/ex07_state_estimation.py`.
+
 ## Locomotion Capabilities
 
 The controller achieves the following performance in MuJoCo simulation:
@@ -37,6 +40,22 @@ The controller achieves the following performance in MuJoCo simulation:
 
 ### Supported Gaits
 - Trot gait (tested at 3.0 Hz with 0.6 duty cycle)
+- Stand (all four feet in stance) with body posture control
+
+### Standing Body Posture Control
+With all four feet on the ground (`StandGait`), the MPC tracks time-varying body posture commands:
+- **Roll / pitch:** ±0.2 rad with rate feedforward (RMS tracking error < 0.01 rad)
+- **Yaw oscillation:** commanded via yaw rate
+- **Body height:** 0.22 m – 0.32 m squat
+- **Body x/y translation:** ±50 mm sway with velocity feedforward
+
+See **`examples/ex05_stand_posture.py`**.
+
+### Supported Robots
+- **Unitree Go2** (~15 kg) — `PinGo2Model` / `MuJoCo_GO2_Model`
+- **Unitree A2** (~40 kg) — `PinA2Model` / `MuJoCo_A2_Model`, standing posture demo in `examples/ex06_a2_stand_posture.py`
+
+Robot-specific parameters (URDF/MJCF paths, base frame, nominal stance, foot radius, joint dry friction) live as class attributes on the pinocchio robot model, so adding another quadruped only requires a small subclass plus its model files under `models/`.
 
 ## Controller Overview
 
@@ -108,6 +127,9 @@ python -m examples.ex01_trot_in_place
 python -m examples.ex02_trot_forward
 python -m examples.ex03_trot_sideway
 python -m examples.ex04_trot_rotation
+python -m examples.ex05_stand_posture
+python -m examples.ex06_a2_stand_posture
+python -m examples.ex07_state_estimation
 ```
 
 ### Plots
@@ -121,6 +143,23 @@ The figures below are generated from running **`examples/ex00_demo.py`**:
 <p align="center"> <img src="media/mpc_state_force_logs.png" width="900"><br/> <sub> <b>Centroidal MPC logs.</b> Optimized ground reaction forces for all four feet, joint torques, center-of-mass position and velocity, ZYX Euler angles, and body angular velocities during a command-scheduled locomotion sequence. </sub> </p>
 
 ## Updates
+07/13/2026 (3)
+- Added a proprioceptive state estimator for real-robot deployment: `LegOdometryKF` (`src/convex_mpc/state_estimator.py`) — MIT Cheetah 3 style linear KF fusing IMU strapdown integration with leg-kinematics measurements under the stationary-stance-foot assumption
+- Validation demo `examples/ex07_state_estimation.py`: trot driven by the KF estimate in closed loop (`USE_ESTIMATOR=True`, real-robot configuration) or ground truth with parallel estimation (`False`); velocity RMS ≤ 0.03 m/s, height RMS ~5 mm, xy drift dominated by true foot slip
+- Docs: `docs/state_estimation.md` (theory, observability, real-robot checklist)
+
+07/13/2026 (2)
+- Added the **Unitree A2** robot (URDF + MJCF under `models/`, `PinA2Model`, `MuJoCo_A2_Model`) with a standing posture demo (`examples/ex06_a2_stand_posture.py`)
+- Generalized the stack for multiple robots: robot parameters (base frame, nominal stance, foot radius, joint friction) moved to the robot model class; MuJoCo↔Pinocchio state sync now maps joints by name (the A2 MJCF declares legs in a different order); leg-controller joint indices derived from the model
+- Added vertical velocity feedforward to the reference trajectory (better squat tracking)
+
+07/13/2026
+- Added standing body posture control (`StandGait`, all four feet in stance): roll, pitch, yaw, body-height and body x/y (±50 mm) tracking via the same convex MPC
+- Reference trajectory generator now accepts desired roll/pitch (+ rate feedforward) and direct x/y position commands
+- Stance legs now compensate their own gravity/Coriolis torques and joint dry friction, so commanded contact forces are actually realized (also reduces trot attitude oscillation)
+- `CentroidalMPC` accepts optional per-example cost matrices (Q, R)
+- New demo: `examples/ex05_stand_posture.py`
+
 02/18/2026
 - Implemented new method to discretize dynamics
 - Iteration speed is 57.4% faster, or roughly 1.57x speedup

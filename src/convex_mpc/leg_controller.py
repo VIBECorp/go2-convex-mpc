@@ -10,20 +10,18 @@ from dataclasses import dataclass
 KP_SWING = np.diag([400, 400, 400])
 KD_SWING = np.diag([75, 75, 75])
 
+# Joint dry-friction feedforward (per-joint values come from the robot model,
+# matching frictionloss in the MJCF). Without it, the friction deadband absorbs
+# small stance-force corrections and the body stalls short of slow position
+# targets (e.g. standing sway).
+FRICTION_VEL_EPS = 0.02     # rad/s, tanh smoothing to avoid chatter at rest
+
 # Mapping from leg name to index in the mask
 LEG_INDEX = {
     "FL": 0,
     "FR": 1,
     "RL": 2,
     "RR": 3,
-}
-
-# Mapping from leg name to the joint torque slice in (C*dq + g)
-JOINT_SLICES = {
-    "FL": slice(6, 9),
-    "FR": slice(9, 12),
-    "RL": slice(12, 15),
-    "RR": slice(15, 18),
 }
 
 @dataclass
@@ -50,7 +48,7 @@ class LegController():
     ):
         # Extract Parameters
         leg_idx = LEG_INDEX[leg]
-        joint_slice = JOINT_SLICES[leg]
+        joint_slice = go2.get_leg_v_indices(leg)
 
         J_foot_world = go2.compute_3x3_foot_Jacobian_world(leg)      # (3x3)
         J_full_foot_world = go2.compute_full_foot_Jacobian_world(leg)  # (3x18)
@@ -98,7 +96,15 @@ class LegController():
             tau_cmd = J_foot_world.T @ force + (C @ go2.current_config.get_dq() + g)[joint_slice]
 
         else:  # Stance phase
-            tau_cmd = J_foot_world.T @ -contact_force
+            # Compensate the leg's own gravity/Coriolis torques so the commanded
+            # contact force is actually realized at the foot (without this, the
+            # realized force is biased by the leg-link weight)
+            tau_cmd = J_foot_world.T @ -contact_force + (C @ go2.current_config.get_dq() + g)[joint_slice]
+
+        # Dry-friction feedforward along the current joint motion direction
+        joint_vel = np.asarray(getattr(go2.current_config, f"{leg}_joint_vel")).reshape(3,)
+        tau_friction = np.asarray(go2.TAU_FRICTION_COMP, dtype=float)
+        tau_cmd = tau_cmd.reshape(3,) + tau_friction * np.tanh(joint_vel / FRICTION_VEL_EPS)
 
         # Update mask memory
         self.last_mask[leg_idx] = current_mask[leg_idx]

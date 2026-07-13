@@ -54,7 +54,7 @@ class Gait():
         T = t_swing + 0.5*t_stance
         pred_time = T / 2.0
 
-        pos_norminal_term = [hip_pos_world[0], hip_pos_world[1], 0.02]
+        pos_norminal_term = [hip_pos_world[0], hip_pos_world[1], go2.FOOT_RADIUS]
         pos_drift_term = [base_vel[0] * pred_time, base_vel[1] * pred_time, 0]
 
         dtheta = yaw_rate * pred_time
@@ -110,7 +110,7 @@ class Gait():
         k_v_y = 0.2 * T          # ~0.1
         k_p_y = 0.05
 
-        pos_norminal_term = [hip_pos_world[0], hip_pos_world[1], 0.02]
+        pos_norminal_term = [hip_pos_world[0], hip_pos_world[1], go2.FOOT_RADIUS]
         pos_drift_term = [x_vel_des * pred_time, y_vel_des * pred_time, 0]
         pos_correction_term = [k_p_x * (pos_com_world[0] - x_pos_des), k_p_y * (pos_com_world[1] - y_pos_des), 0]
         vel_correction_term = [k_v_x * (vel_com_world[0] - x_vel_des), k_v_y * (vel_com_world[1] - y_vel_des), 0]
@@ -135,6 +135,9 @@ class Gait():
         pos_foot_traj_eval_at_world = self.make_swing_trajectory(foot_pos, pos_touchdown_world, t_swing, h_sw=HEIGHT_SWING)
         return pos_foot_traj_eval_at_world, pos_touchdown_world
 
+
+    def is_standing(self):
+        return False
 
     def make_swing_trajectory(self, p0, pf, t_swing, h_sw):
 
@@ -172,6 +175,24 @@ class Gait():
             return p, v, a
 
         return eval_at
-    
+
+
+class StandGait(Gait):
+    """
+    Full-support "gait": all four feet stay in stance at all times.
+
+    Used for body posture control while standing. The frequency only sets
+    the MPC prediction horizon (one gait_period), since no leg ever swings.
+    """
+
+    def __init__(self, frequency_hz=3.0):
+        super().__init__(frequency_hz, duty=1.0)
+
+    def compute_contact_table(self, t0: float, dt: float, N: int) -> np.ndarray:
+        # 1 = stance for every leg at every time step
+        return np.ones((4, N), dtype=np.int32)
+
+    def is_standing(self):
+        return True
 
 

@@ -14,17 +14,37 @@ import pinocchio as pin
 REPO = Path(__file__).resolve().parents[2]
 XML_PATH = REPO / "models" / "MJCF" / "go2" / "scene.xml"
 
+# Joint ordering of the pinocchio configuration vector (q[7:] / dq[6:])
+PIN_JOINT_ORDER = [f"{leg}_{j}_joint" for leg in ("FL", "FR", "RL", "RR")
+                   for j in ("hip", "thigh", "calf")]
+
 class MuJoCo_GO2_Model:
+
+    ROBOT_XML_PATH = XML_PATH
+
     def __init__(self):
         # Load the MuJoCo model
-        self.model = mj.MjModel.from_xml_path(str(XML_PATH))
+        self.model = mj.MjModel.from_xml_path(str(self.ROBOT_XML_PATH))
         self.data = mj.MjData(self.model)
         self.viewer = None
         self.base_bid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "base_link")
 
+        # MuJoCo may declare the legs in a different order than pinocchio
+        # (e.g. A2: FL,RL,FR,RR). Map by joint name instead of assuming order.
+        q_adr, v_adr = [], []
+        for name in PIN_JOINT_ORDER:
+            jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name)
+            if jid < 0:
+                raise ValueError(f"Joint '{name}' not found in {self.ROBOT_XML_PATH}")
+            q_adr.append(self.model.jnt_qposadr[jid])
+            v_adr.append(self.model.jnt_dofadr[jid])
+        self.joint_qpos_adr = np.array(q_adr)   # mujoco qpos index of each pin joint
+        self.joint_dof_adr = np.array(v_adr)    # mujoco qvel index of each pin joint
+
     def update_with_q_pin(self, q_pin):
-        px, py, pz, qx, qy, qz, qw, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12 = q_pin[:]
-        self.data.qpos[:] = [px, py, pz, qw, qx, qy, qz, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12]
+        px, py, pz, qx, qy, qz, qw = q_pin[0:7]
+        self.data.qpos[0:7] = [px, py, pz, qw, qx, qy, qz]
+        self.data.qpos[self.joint_qpos_adr] = q_pin[7:19]
         mj.mj_forward(self.model, self.data)
 
     def set_leg_joint_torque(self, leg: str, torque):
@@ -61,9 +81,9 @@ class MuJoCo_GO2_Model:
         v_body = R.T @ v_world
 
         # Convert to Pin
-        # configuration uses qx qy qz qw
-        q_pin  = np.concatenate([mujoco_q[0:3], [qx, qy, qz, qw], mujoco_q[7:]])
-        dq_pin = np.concatenate([v_body, w_body, mujoco_dq[6:]])
+        # configuration uses qx qy qz qw; joints mapped by name (order may differ)
+        q_pin  = np.concatenate([mujoco_q[0:3], [qx, qy, qz, qw], mujoco_q[self.joint_qpos_adr]])
+        dq_pin = np.concatenate([v_body, w_body, mujoco_dq[self.joint_dof_adr]])
 
         go2.update_model(q_pin, dq_pin)
 
@@ -122,3 +142,7 @@ class MuJoCo_GO2_Model:
                     k += 1
 
                 time.sleep(1)
+
+
+class MuJoCo_A2_Model(MuJoCo_GO2_Model):
+    ROBOT_XML_PATH = REPO / "models" / "MJCF" / "a2" / "scene.xml"

@@ -14,15 +14,15 @@ URDF_PATH = PACKAGE_DIRS / "go2_description" / "urdf" / "go2_description.urdf"
 
 class ConfigurationState:
 
-    def __init__(self):
+    def __init__(self, base_height=0.27, default_joint_angles=(0.0, 0.9, -1.8)):
 
         # Initial generalized positions
-        self.base_pos = np.array([0.0, 0.0, 0.27])
+        self.base_pos = np.array([0.0, 0.0, base_height])
         self.base_quad = np.array([0.0, 0.0, 0.0, 1.0])
-        self.FL_joint_angle = np.array([0.0, 0.9, -1.8])
-        self.FR_joint_angle =  np.array([0.0, 0.9, -1.8])
-        self.RL_joint_angle = np.array([0.0, 0.9, -1.8])
-        self.RR_joint_angle = np.array([0.0, 0.9, -1.8])
+        self.FL_joint_angle = np.array(default_joint_angles, dtype=float)
+        self.FR_joint_angle = np.array(default_joint_angles, dtype=float)
+        self.RL_joint_angle = np.array(default_joint_angles, dtype=float)
+        self.RR_joint_angle = np.array(default_joint_angles, dtype=float)
 
         # Initial generalized velocities
         self.base_vel = np.array([0.0, 0.0, 0.0])
@@ -108,12 +108,21 @@ class ConfigurationState:
 
 class PinGo2Model:
 
+    # Robot-specific parameters (override in subclasses for other robots)
+    ROBOT_URDF_PATH = URDF_PATH
+    ROBOT_PACKAGE_DIRS = [str(PACKAGE_DIRS)]
+    BASE_FRAME = "base"
+    BASE_HEIGHT = 0.27                          # nominal standing base height [m]
+    DEFAULT_JOINT_ANGLES = (0.0, 0.9, -1.8)     # nominal (hip, thigh, calf) [rad]
+    FOOT_RADIUS = 0.02                          # foot sphere radius [m], used as touchdown height
+    TAU_FRICTION_COMP = (0.2, 0.2, 0.2)         # joint dry friction (hip, thigh, calf) [Nm]
+
     def __init__(self):
 
         # Build robot (free-flyer)
         robot = RobotWrapper.BuildFromURDF(
-            str(URDF_PATH),
-            package_dirs=[str(PACKAGE_DIRS)],
+            str(self.ROBOT_URDF_PATH),
+            package_dirs=list(self.ROBOT_PACKAGE_DIRS),
             root_joint=pin.JointModelFreeFlyer()
         )
 
@@ -124,8 +133,16 @@ class PinGo2Model:
         # Initial data containers
         self.data = self.model.createData()
 
+        # The whole stack (ConfigurationState layout, MuJoCo sync, leg controller)
+        # assumes this pinocchio joint ordering; guard against URDFs that differ
+        expected = [f"{leg}_{j}_joint" for leg in ("FL", "FR", "RL", "RR")
+                    for j in ("hip", "thigh", "calf")]
+        actual = list(self.model.names)[2:]
+        if actual != expected:
+            raise ValueError(f"Unexpected joint ordering in URDF: {actual}")
+
         # Initial configuration
-        self.current_config = ConfigurationState()
+        self.current_config = ConfigurationState(self.BASE_HEIGHT, self.DEFAULT_JOINT_ANGLES)
         self.q_init = self.current_config.get_q()
         self.dq_init = self.current_config.get_dq()
 
@@ -133,7 +150,7 @@ class PinGo2Model:
         pin.forwardKinematics(self.model, self.data, self.q_init)
         pin.updateFramePlacements(self.model, self.data)
 
-        self.base_id = self.model.getFrameId("base")
+        self.base_id = self.model.getFrameId(self.BASE_FRAME)
 
         self.FL_foot_id = self.model.getFrameId("FL_foot_joint")
         self.FR_foot_id = self.model.getFrameId("FR_foot_joint")
@@ -172,6 +189,11 @@ class PinGo2Model:
     def get_hip_offset(self, leg: str):
         name = f"{leg.upper()}_hip_offset"
         return getattr(self, name)
+
+    def get_leg_v_indices(self, leg: str):
+        # Velocity-space indices of this leg's (hip, thigh, calf) joints
+        joint_ids = [self.model.getJointId(f"{leg}_{j}_joint") for j in ("hip", "thigh", "calf")]
+        return np.array([self.model.joints[jid].idx_v for jid in joint_ids])
     
     def compute_com_x_vec(self):
 
@@ -374,6 +396,22 @@ class PinGo2Model:
             x_traj[:, i+1] = (self.Ad @ x_traj[:, [i]] + self.Bd[i] @ u_i + self.gd).flatten()
 
         return x_init, x_traj
+
+
+class PinA2Model(PinGo2Model):
+    """
+    Unitree A2 (~40 kg). Same joint naming and pinocchio ordering as Go2;
+    only the URDF source, geometry and nominal stance differ.
+    """
+
+    ROBOT_URDF_PATH = REPO / "models" / "URDF" / "a2_description" / "urdf" / "a2.urdf"
+    # A2 meshes are referenced relative to the urdf directory ("../meshes/...")
+    ROBOT_PACKAGE_DIRS = [str(REPO / "models" / "URDF" / "a2_description" / "urdf")]
+    BASE_FRAME = "base_link"
+    BASE_HEIGHT = 0.415                         # feet touch ground at (0, 0.8, -1.6)
+    DEFAULT_JOINT_ANGLES = (0.0, 0.8, -1.6)
+    FOOT_RADIUS = 0.032
+    TAU_FRICTION_COMP = (1.0, 1.0, 3.0)         # frictionloss in a2.xml (hip, thigh, calf)
 
 
 

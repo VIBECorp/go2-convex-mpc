@@ -38,9 +38,9 @@ OPTS = {
 SOLVER_NAME: str = "osqp"
 
 class CentroidalMPC:
-    def __init__(self, go2:PinGo2Model, traj: ComTraj):
-        self.Q = COST_MATRIX_Q 
-        self.R = COST_MATRIX_R 
+    def __init__(self, go2:PinGo2Model, traj: ComTraj, Q=None, R=None):
+        self.Q = COST_MATRIX_Q if Q is None else np.asarray(Q)
+        self.R = COST_MATRIX_R if R is None else np.asarray(R)
         self.nvars = traj.N * NX + traj.N * NU    # Total number of decision variables                          
         self.solve_time: float = 0 
         self.N = traj.N
