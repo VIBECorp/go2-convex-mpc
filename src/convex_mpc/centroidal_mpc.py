@@ -21,17 +21,22 @@ OPTS = {
     'warm_start_primal': True,
     'warm_start_dual': True,
 
+    # Termination must be strict: with warm start, loose scaled tolerances let
+    # OSQP return badly under-converged solutions when the state moves fast
+    # (observed ~100 N per-foot force error on the A2, enough to make it stand
+    # up into the leg singularity). Polishing recovers the exact active-set
+    # solution at ~no cost for this QP size.
     "osqp": {
-        "eps_abs": 1e-4,
-        "eps_rel": 1e-4,
-        "max_iter": 1000,
-        "polish": False,
+        "eps_abs": 1e-5,
+        "eps_rel": 1e-5,
+        "max_iter": 4000,
+        "polish": True,
         "verbose": False,
         'adaptive_rho': True,
         "check_termination": 10,
         'adaptive_rho_interval': 25,
         "scaling": 5,
-        "scaled_termination": True
+        "scaled_termination": False
     }
 }
 

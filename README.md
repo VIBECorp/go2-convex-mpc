@@ -130,6 +130,8 @@ python -m examples.ex04_trot_rotation
 python -m examples.ex05_stand_posture
 python -m examples.ex06_a2_stand_posture
 python -m examples.ex07_state_estimation
+python -m examples.ex08_stand_random_stance
+python -m examples.ex09_a2_stand_random_stance
 ```
 
 ### Plots
@@ -143,6 +145,10 @@ The figures below are generated from running **`examples/ex00_demo.py`**:
 <p align="center"> <img src="media/mpc_state_force_logs.png" width="900"><br/> <sub> <b>Centroidal MPC logs.</b> Optimized ground reaction forces for all four feet, joint torques, center-of-mass position and velocity, ZYX Euler angles, and body angular velocities during a command-scheduled locomotion sequence. </sub> </p>
 
 ## Updates
+07/17/2026
+- New demos `examples/ex08_stand_random_stance.py` (Go2) and `examples/ex09_a2_stand_random_stance.py` (A2): each foot starts with a random xy offset (uniform ±30 mm, per-leg damped-least-squares IK) and a standing posture sequence runs on the asymmetric support polygon — no controller change needed since the MPC uses the actual foot lever arms (foot slip < 3 mm over the run; set `EX08_FOOT_SEED` / `EX09_FOOT_SEED` for reproducible offsets)
+- Fixed OSQP termination settings (`eps` 1e-4 → 1e-5, unscaled residuals, polish on): the previous loose scaled tolerances let warm-started solves return badly under-converged solutions — on the A2 the commanded vertical force could err by ~50 N, making the robot stand up into the leg singularity. Trot solve time rises to ~6 ms mean (still well inside the 20.8 ms MPC budget); all examples re-verified
+
 07/13/2026 (3)
 - Added a proprioceptive state estimator for real-robot deployment: `LegOdometryKF` (`src/convex_mpc/state_estimator.py`) — MIT Cheetah 3 style linear KF fusing IMU strapdown integration with leg-kinematics measurements under the stationary-stance-foot assumption
 - Validation demo `examples/ex07_state_estimation.py`: trot driven by the KF estimate in closed loop (`USE_ESTIMATOR=True`, real-robot configuration) or ground truth with parallel estimation (`False`); velocity RMS ≤ 0.03 m/s, height RMS ~5 mm, xy drift dominated by true foot slip
